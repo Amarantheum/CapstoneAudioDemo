@@ -6,3 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+gp_resonator = { git = "https://github.com/Amarantheum/GPResonatorLibrary.git"}
+resonator_builder = { git = "https://github.com/Amarantheum/GPResonatorLibrary.git"}
+wav_util = { git = "https://github.com/Amarantheum/GPResonatorLibrary.git"}
+cpal = "0.15.2"
+lazy_static = "1.4.0"
+parking_lot = "0.12.1"
+eframe = "0.21.3"
+egui = "0.21.0"
