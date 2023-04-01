@@ -34,7 +34,7 @@ pub fn prepare_cpal_stream() -> Result<cpal::Stream, Box<dyn Error>> {
     Ok(stream)
 }
 
-fn write_silence<T: Sample + FromSample<f32>>(data: &mut [T]) {
+fn write_audio<T: Sample + FromSample<f32>>(data: &mut [T]) {
     let audio = AUDIO.lock();
     let mut cur = 0;
     if *P.lock() {
