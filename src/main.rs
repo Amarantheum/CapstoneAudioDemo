@@ -10,7 +10,7 @@ use parking_lot::Mutex;
 use std::env;
 use std::fs::File;
 use std::io::BufReader;
-use rodio::{Decoder, OutputStream, source::Source};
+use rodio::{Decoder, source::Source};
 use state::AudioState;
 use lazy_static::lazy_static;
 use crate::stream::prepare_cpal_stream;
@@ -21,45 +21,36 @@ mod state;
 mod graph;
 
 lazy_static!{
-    static ref PROGRESS: Arc<Mutex<f64>> = Arc::new(Mutex::new(0.0));
 }
 
 #[derive(Clone, Data, Lens)]
 struct AppState {
     progress: ProgressBar,
+    r_progress: ProgressBar,
     playing: bool,
+    r_playing: bool,
     audio_state: Arc<Mutex<AudioState>>,
+    r_audio_state: Arc<Mutex<AudioState>>,
     line_graph: GraphData,
 }
 
 #[derive(Clone, Lens)]
 struct ProgressBar {
-    progress: Arc<Mutex<f64>>,
     audio: Arc<Mutex<AudioState>>,
 }
 
 impl Data for ProgressBar {
-    fn same(&self, other: &Self) -> bool {
-        let v1 = *self.progress.lock();
-        let v2 = *other.progress.lock();
-        v1 == v2
+    fn same(&self, _other: &Self) -> bool {
+        // stub fow now
+        false
     }
 }
 
 impl ProgressBar {
     pub fn init(audio: Arc<Mutex<AudioState>>) -> Self {
         Self {
-            progress: Arc::clone(&*PROGRESS),
             audio,
         }
-    }
-
-    fn set_progress(&mut self, v: f64) {
-        *self.progress.lock() = v;
-    }
-
-    fn get_progress(&self) -> f64 {
-        *self.progress.lock()
     }
 }
 
@@ -74,10 +65,8 @@ impl Widget<ProgressBar> for CustomProgressBar {
                     let x = mouse_event.pos.x;
                     let width = ctx.size().width;
                     let mut audio = data.audio.lock();
-                    let mut progress = data.progress.lock();
-                    *progress = (x / width).max(0.0).min(1.0);
-                    audio.set_loc(*progress);
-                    std::mem::drop(progress);
+                    let progress = (x / width).max(0.0).min(1.0);
+                    audio.set_loc(progress);
                     std::mem::drop(audio);
                     ctx.set_handled();
                     ctx.request_paint();
@@ -109,7 +98,10 @@ impl Widget<ProgressBar> for CustomProgressBar {
     fn paint(&mut self, ctx: &mut druid::PaintCtx, data: &ProgressBar, _env: &druid::Env) {
         let size = ctx.size();
         let rect = Rect::from_origin_size((0.0, 0.0), size);
-        let filled_rect = Rect::from_origin_size((0.0, 0.0), (size.width * data.get_progress(), size.height));
+        let audio = data.audio.lock();
+        let progress = audio.get_progress();
+        let filled_rect = Rect::from_origin_size((0.0, 0.0), (size.width * progress, size.height));
+        std::mem::drop(audio);
         ctx.fill(rect, &Color::grey(1.0));
         ctx.fill(filled_rect, &Color::rgb8(0x7B, 0x61, 0x9E));
     }
@@ -120,15 +112,29 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("{:?}", args);
     let window = WindowDesc::new(build_ui());
     let audio = Arc::new(Mutex::new(AudioState::init_audio_state("./audio/static_memories.wav")?));
+    let r_audio = Arc::new(Mutex::new(AudioState::init_audio_state("./audio/Datmosphere.wav")?));
+    let (r_combined_audio, spec, scale, min_value) = load_resonant_audio("./audio/Datmosphere.wav", 1000)?;
     
-    let resonant_freqs = load_resonant_audio("./audio/Datmosphere.wav", 1000)?;
-    
-    let stream = prepare_cpal_stream(Arc::clone(&audio))?;
+    let stream = prepare_cpal_stream(Arc::clone(&audio), Arc::clone(&r_audio))?;
     let state = AppState {
         progress: ProgressBar::init(Arc::clone(&audio)),
+        r_progress: ProgressBar::init(Arc::clone(&r_audio)),
         playing: false,
+        r_playing: false,
         audio_state: audio,
-        line_graph: GraphData { data: resonant_freqs, min_line: 0.1, peaks: vec![], max_range: 0.9, min_range: 0.3 },
+        r_audio_state: r_audio,
+        line_graph: GraphData { 
+            spec: spec, 
+            min_line: 0.1, 
+            max_range: 0.9, 
+            min_range: 0.3, 
+            min_prominence: 0.5, 
+            audio: r_combined_audio, 
+            sample_rate: 48_000_f64, 
+            max_peaks: 100, 
+            spectrum_scale: scale, 
+            spectrum_base: min_value
+        },
     };
     AppLauncher::with_window(window)
         .log_to_console()
@@ -150,17 +156,50 @@ fn build_ui() -> impl druid::Widget<AppState> {
         let bounds = ctx.size().to_rect();
         ctx.fill(bounds, &Color::rgb8(0x7B, 0x61, 0x9E));
     }))
-    .on_click(|ctx, data: &mut AppState, _env| {
+    .on_click(|_ctx, data: &mut AppState, _env| {
         data.playing = !data.playing;
         data.audio_state.lock().playing = data.playing;
     });
 
     let progress_bar = SizedBox::new(CustomProgressBar.lens(AppState::progress)).height(24.0);
-    let graph = SizedBox::new(LineGraph.lens(AppState::line_graph)).height(400.0);
-
     let label = Label::new(|_data: &AppState, _env: &_| {
         "./audio/static_memories.wav"
     });
+
+    let r_play_pause_button = Label::new(|data: &AppState, _env: &_| {
+        if data.r_playing {
+            "Pause".to_string()
+        } else {
+            "Play".to_string()
+        }
+    })
+    .with_text_size(24.0)
+    .padding(10.0)
+    .background(Painter::new(|ctx, _data: &AppState, _env| {
+        let bounds = ctx.size().to_rect();
+        ctx.fill(bounds, &Color::rgb8(0x7B, 0x61, 0x9E));
+    }))
+    .on_click(|_ctx, data: &mut AppState, _env| {
+        data.r_playing = !data.r_playing;
+        data.r_audio_state.lock().playing = data.r_playing;
+    });
+
+    let r_progress_bar = SizedBox::new(CustomProgressBar.lens(AppState::r_progress)).height(24.0);
+    let r_label = Label::new(|_data: &AppState, _env: &_| {
+        "./audio/Datmosphere.wav"
+    });
+
+    let graph = SizedBox::new(LineGraph.lens(AppState::line_graph)).height(400.0);
+
+    let min_prom_label = Label::new("min prominence");
+    let min_prom_lens = AppState::line_graph.then(GraphData::min_prominence);
+    let min_prom_slider = Slider::new()
+        .with_range(0.0, 1.0)
+        .with_step(0.0001)
+        .track_color(druid::KeyOrValue::Concrete(Color::rgb8(0x7B, 0x61, 0x9E)))
+        .knob_style(druid::widget::KnobStyle::Circle)
+        .axis(Axis::Vertical)
+        .lens(min_prom_lens);
 
     let min_thresh_label = Label::new("min threshold");
     let min_line_lens = AppState::line_graph.then(GraphData::min_line);
@@ -201,19 +240,35 @@ fn build_ui() -> impl druid::Widget<AppState> {
         )
         .with_child(progress_bar)
         .with_spacer(8.0)
+        .with_child(
+            Flex::row()
+                .with_child(r_play_pause_button)
+                .with_spacer(8.0)
+                .with_child(r_label),
+        )
+        .with_child(r_progress_bar)
+        .with_spacer(8.0)
         .with_child(graph)
         .with_child(
             Flex::row()
                 .with_child(
                     Flex::column()
+                        .with_child(min_prom_label)
+                        .with_child(min_prom_slider) 
+                )
+                .with_spacer(8.0)
+                .with_child(
+                    Flex::column()
                         .with_child(min_thresh_label)
                         .with_child(thresh_slider) 
                 )
+                .with_spacer(8.0)
                 .with_child(
                     Flex::column()
                         .with_child(min_freq_label)
                         .with_child(min_freq_slider) 
                 )
+                .with_spacer(8.0)
                 .with_child(
                     Flex::column()
                         .with_child(max_freq_label)
@@ -242,7 +297,7 @@ fn load_audio<P: AsRef<Path>>(path: P) -> Result<[Vec<f32>; 2], Box<dyn Error>> 
 }
 
 #[inline]
-fn load_resonant_audio<P: AsRef<Path>>(path: P, resolution: usize) -> Result<Vec<f64>, Box<dyn Error>> {
+fn load_resonant_audio<P: AsRef<Path>>(path: P, resolution: usize) -> Result<(Vec<f64>, Vec<f64>, f64, f64), Box<dyn Error>> {
     let [chan1, chan2] = load_audio(path)?;
     let audio = chan1.into_iter().zip(chan2.into_iter()).map(|v| ((v.0 + v.1) / 2.0) as f64).collect::<Vec<f64>>();
     let near_pow_2 = ((audio.len() - 1).ilog2() + 1) as usize;
@@ -261,7 +316,8 @@ fn load_resonant_audio<P: AsRef<Path>>(path: P, resolution: usize) -> Result<Vec
             global_max = *v;
         }
     }
-    
+    let min_value = -3.0;
+    let scale = global_max - min_value;
     let mut cur_bin = 0;
     let mut out = Vec::with_capacity(resolution);
     for i in 0..resolution {
@@ -272,7 +328,7 @@ fn load_resonant_audio<P: AsRef<Path>>(path: P, resolution: usize) -> Result<Vec
             }
             cur_bin += 1;
         }
-        out.push((max.max(-3.0) + 3.0) / (global_max + 3.0))
+        out.push((max.max(min_value) - min_value) / scale)
     }
-    Ok(out)
+    Ok((audio, out, scale, min_value))
 }

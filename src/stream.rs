@@ -8,10 +8,12 @@ use lazy_static::lazy_static;
 
 lazy_static!{
     static ref AUDIO_STATE: Mutex<Option<Arc<Mutex<AudioState>>>> = Mutex::new(None);
+    static ref R_AUDIO_STATE: Mutex<Option<Arc<Mutex<AudioState>>>> = Mutex::new(None);
 }
 
-pub fn prepare_cpal_stream(audio: Arc<Mutex<AudioState>>) -> Result<cpal::Stream, Box<dyn Error>> {
+pub fn prepare_cpal_stream(audio: Arc<Mutex<AudioState>>, r_audio: Arc<Mutex<AudioState>>) -> Result<cpal::Stream, Box<dyn Error>> {
     *AUDIO_STATE.lock() = Some(audio);
+    *R_AUDIO_STATE.lock() = Some(r_audio);
 
     let host = cpal::default_host();
     let device = host.default_output_device().ok_or("No output device available")?;
@@ -39,17 +41,23 @@ pub fn prepare_cpal_stream(audio: Arc<Mutex<AudioState>>) -> Result<cpal::Stream
 
 #[inline]
 fn write_audio<T: Sample + FromSample<f32>>(data: &mut [T]) {
+    for sample in data.iter_mut() {
+        *sample = Sample::EQUILIBRIUM;
+    }
+
     let state = AUDIO_STATE.lock();
     let mut audio = state.as_ref().unwrap().lock();
     if audio.playing {
-        audio.write_audio(data);
-        audio.update_progress();
-    } else {
-        std::mem::drop(audio);
-        std::mem::drop(state);
-        for sample in data.iter_mut() {
-            *sample = Sample::EQUILIBRIUM;
-        }
+        audio.add_audio(data);
     }
+    std::mem::drop(audio);
+    std::mem::drop(state);
     
+    let state = R_AUDIO_STATE.lock();
+    let mut audio = state.as_ref().unwrap().lock();
+    if audio.playing {
+        audio.add_audio(data);
+    }
+    std::mem::drop(audio);
+    std::mem::drop(state);
 }
