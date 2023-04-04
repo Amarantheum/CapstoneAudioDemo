@@ -25,16 +25,20 @@ lazy_static!{
 
 #[derive(Clone, Data, Lens)]
 struct AppState {
+    #[data(ignore)]
     progress: ProgressBar,
+    #[data(ignore)]
     r_progress: ProgressBar,
     playing: bool,
     r_playing: bool,
+    #[data(ignore)]
     audio_state: Arc<Mutex<AudioState>>,
+    #[data(ignore)]
     r_audio_state: Arc<Mutex<AudioState>>,
     line_graph: GraphData,
 }
 
-#[derive(Clone, Lens)]
+#[derive(Clone)]
 struct ProgressBar {
     audio: Arc<Mutex<AudioState>>,
 }
@@ -69,7 +73,6 @@ impl Widget<ProgressBar> for CustomProgressBar {
                     audio.set_loc(progress);
                     std::mem::drop(audio);
                     ctx.set_handled();
-                    ctx.request_paint();
                 }
             },
             druid::Event::WindowConnected => {
@@ -113,7 +116,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let window = WindowDesc::new(build_ui());
     let audio = Arc::new(Mutex::new(AudioState::init_audio_state("./audio/static_memories.wav")?));
     let r_audio = Arc::new(Mutex::new(AudioState::init_audio_state("./audio/Datmosphere.wav")?));
-    let (r_combined_audio, spec, scale, min_value) = load_resonant_audio("./audio/Datmosphere.wav", 1000)?;
     
     let stream = prepare_cpal_stream(Arc::clone(&audio), Arc::clone(&r_audio))?;
     let state = AppState {
@@ -123,18 +125,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         r_playing: false,
         audio_state: audio,
         r_audio_state: r_audio,
-        line_graph: GraphData { 
-            spec: spec, 
-            min_line: 0.1, 
-            max_range: 0.9, 
-            min_range: 0.3, 
-            min_prominence: 0.5, 
-            audio: r_combined_audio, 
-            sample_rate: 48_000_f64, 
-            max_peaks: 100, 
-            spectrum_scale: scale, 
-            spectrum_base: min_value
-        },
+        line_graph: GraphData::new("./audio/Datmosphere.wav")?,
     };
     AppLauncher::with_window(window)
         .log_to_console()
@@ -190,6 +181,46 @@ fn build_ui() -> impl druid::Widget<AppState> {
     });
 
     let graph = SizedBox::new(LineGraph.lens(AppState::line_graph)).height(400.0);
+
+    let build_button = Label::new("BUILD RESONATOR")
+    .with_text_size(24.0)
+    .padding(10.0)
+    .background(Painter::new(|ctx, _data: &AppState, _env| {
+        let bounds = ctx.size().to_rect();
+        ctx.fill(bounds, &Color::rgb8(0x7B, 0x61, 0x9E));
+    }))
+    .on_click(|_ctx, data: &mut AppState, _env| {
+        let plan = data.line_graph.plan.lock();
+        println!("{:?}", plan);
+        let mut audio_state = data.audio_state.lock();
+        let array = match plan.build_resonator_array(audio_state.sample_rate) {
+            Ok(v) => {
+                let v1 = v.clone();
+                let v2 = v;
+                Some((v1, v2))
+            },
+            Err(e) => {
+                println!("Error occurred while building resonator array: {:?}", e);
+                None
+            }
+        };
+        audio_state.filter = array;
+    });
+
+    let progress_bar = SizedBox::new(CustomProgressBar.lens(AppState::progress)).height(24.0);
+    let label = Label::new(|_data: &AppState, _env: &_| {
+        "./audio/static_memories.wav"
+    });
+
+    let max_peaks_label = Label::new("max peaks");
+    let max_peaks_lens = AppState::line_graph.then(GraphData::max_peaks);
+    let max_peaks_slider = Slider::new()
+        .with_range(0.0, 1.0)
+        .with_step(0.0001)
+        .track_color(druid::KeyOrValue::Concrete(Color::rgb8(0x7B, 0x61, 0x9E)))
+        .knob_style(druid::widget::KnobStyle::Circle)
+        .axis(Axis::Vertical)
+        .lens(max_peaks_lens);
 
     let min_prom_label = Label::new("min prominence");
     let min_prom_lens = AppState::line_graph.then(GraphData::min_prominence);
@@ -253,6 +284,12 @@ fn build_ui() -> impl druid::Widget<AppState> {
             Flex::row()
                 .with_child(
                     Flex::column()
+                        .with_child(max_peaks_label)
+                        .with_child(max_peaks_slider) 
+                )
+                .with_spacer(8.0)
+                .with_child(
+                    Flex::column()
                         .with_child(min_prom_label)
                         .with_child(min_prom_slider) 
                 )
@@ -274,15 +311,18 @@ fn build_ui() -> impl druid::Widget<AppState> {
                         .with_child(max_freq_label)
                         .with_child(max_freq_slider) 
                 )
+                .with_spacer(8.0)
+                .with_child(build_button)
             
         )
 
 }
 
 #[inline]
-fn load_audio<P: AsRef<Path>>(path: P) -> Result<[Vec<f32>; 2], Box<dyn Error>> {
+fn load_audio<P: AsRef<Path>>(path: P) -> Result<([Vec<f32>; 2], f64), Box<dyn Error>> {
     let file = File::open(path)?;
     let source = Decoder::new(BufReader::new(file))?;
+    let sample_rate = source.sample_rate() as f64;
     let channels = source.channels();
     if channels != 2 {
         return Err("This app only supports audio files with 2 channels :C".into());
@@ -293,42 +333,5 @@ fn load_audio<P: AsRef<Path>>(path: P) -> Result<[Vec<f32>; 2], Box<dyn Error>> 
         samples[cur].push(v);
         cur = (cur + 1) % 2;
     }
-    Ok(samples)
-}
-
-#[inline]
-fn load_resonant_audio<P: AsRef<Path>>(path: P, resolution: usize) -> Result<(Vec<f64>, Vec<f64>, f64, f64), Box<dyn Error>> {
-    let [chan1, chan2] = load_audio(path)?;
-    let audio = chan1.into_iter().zip(chan2.into_iter()).map(|v| ((v.0 + v.1) / 2.0) as f64).collect::<Vec<f64>>();
-    let near_pow_2 = ((audio.len() - 1).ilog2() + 1) as usize;
-    let fft_size = 2_usize.pow(near_pow_2 as u32);
-    let mut fft = FftCalculator::new(audio.len(), fft_size - audio.len())?;
-    let comp_freqs = fft.real_fft(&audio[..], resonator_builder::fft::window::Rectangular::real_window);
-    
-    let freqs = comp_freqs[0..fft_size / 2]
-        .into_iter()
-        .map(|v| v.norm().log10())
-        .collect::<Vec<f64>>();
-    
-    let mut global_max = f64::MIN;
-    for v in &freqs {
-        if *v > global_max {
-            global_max = *v;
-        }
-    }
-    let min_value = -3.0;
-    let scale = global_max - min_value;
-    let mut cur_bin = 0;
-    let mut out = Vec::with_capacity(resolution);
-    for i in 0..resolution {
-        let mut max = f64::MIN;
-        while (cur_bin as f64 / freqs.len() as f64) < ((i + 1) as f64 / resolution as f64) {
-            if max < freqs[cur_bin] {
-                max = freqs[cur_bin];
-            }
-            cur_bin += 1;
-        }
-        out.push((max.max(min_value) - min_value) / scale)
-    }
-    Ok((audio, out, scale, min_value))
+    Ok((samples, sample_rate))
 }

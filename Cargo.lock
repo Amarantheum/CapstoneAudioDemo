@@ -145,7 +145,6 @@ checksum = "0d8c1fef690941d3e7788d328517591fecc684c084084702d6ff1641e993699a"
 [[package]]
 name = "bode_plot"
 version = "0.1.0"
-source = "git+https://github.com/Amarantheum/GPResonatorLibrary.git#2e8178d20b35c86bf4c3273687dc6448b5c7d71d"
 dependencies = [
  "minifb",
  "num-complex",
@@ -1089,7 +1088,6 @@ dependencies = [
 [[package]]
 name = "gp_resonator"
 version = "0.1.0"
-source = "git+https://github.com/Amarantheum/GPResonatorLibrary.git#2e8178d20b35c86bf4c3273687dc6448b5c7d71d"
 dependencies = [
  "bode_plot",
  "hound",
@@ -2256,7 +2254,6 @@ checksum = "f162c6dd7b008981e4d40210aca20b4bd0f9b60ca9271061b07f78537722f2e1"
 [[package]]
 name = "resonator_builder"
 version = "0.1.0"
-source = "git+https://github.com/Amarantheum/GPResonatorLibrary.git#2e8178d20b35c86bf4c3273687dc6448b5c7d71d"
 dependencies = [
  "bode_plot",
  "find_peaks",
@@ -3041,7 +3038,6 @@ checksum = "0046fef7e28c3804e5e38bfa31ea2a0f73905319b677e57ebe37e49358989b5d"
 [[package]]
 name = "wav_util"
 version = "0.1.0"
-source = "git+https://github.com/Amarantheum/GPResonatorLibrary.git#2e8178d20b35c86bf4c3273687dc6448b5c7d71d"
 dependencies = [
  "hound",
  "statrs",

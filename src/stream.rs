@@ -40,7 +40,7 @@ pub fn prepare_cpal_stream(audio: Arc<Mutex<AudioState>>, r_audio: Arc<Mutex<Aud
 }
 
 #[inline]
-fn write_audio<T: Sample + FromSample<f32>>(data: &mut [T]) {
+fn write_audio(data: &mut [f32]) {
     for sample in data.iter_mut() {
         *sample = Sample::EQUILIBRIUM;
     }
@@ -60,4 +60,8 @@ fn write_audio<T: Sample + FromSample<f32>>(data: &mut [T]) {
     }
     std::mem::drop(audio);
     std::mem::drop(state);
+    
+    for v in data {
+        *v = v.max(-1.0).min(1.0);
+    }
 }
