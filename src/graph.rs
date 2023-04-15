@@ -136,7 +136,6 @@ impl Widget<GraphData> for LineGraph {
     }
 
     fn paint(&mut self, ctx: &mut PaintCtx, data: &GraphData, env: &Env) {
-        println!("repaint");
         // get the size of the widget
         let size = ctx.size();
 
@@ -178,7 +177,7 @@ impl Widget<GraphData> for LineGraph {
                 .with_min_freq(data.min_range)
                 .with_max_freq(data.max_range)
                 .with_min_threshold(data.min_line * data.spectrum_scale + data.spectrum_base)
-                .plan(&data.audio[..], data.sample_rate);
+                .plan(&data.audio[..]);
         }
 
         for peak in &plan.resonators {

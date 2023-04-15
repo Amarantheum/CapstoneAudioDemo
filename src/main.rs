@@ -21,6 +21,8 @@ mod state;
 mod graph;
 
 lazy_static!{
+    static ref DECAY: Mutex<(bool, f64)> = Mutex::new((false, 0.5));
+
 }
 
 #[derive(Clone, Data, Lens)]
@@ -36,6 +38,48 @@ struct AppState {
     #[data(ignore)]
     r_audio_state: Arc<Mutex<AudioState>>,
     line_graph: GraphData,
+}
+
+struct AudioDecayLens;
+
+impl Lens<AppState, f64> for AudioDecayLens {
+    fn with<V, F: FnOnce(&f64) -> V>(&self, data: &AppState, f: F) -> V {
+        let decay = data.audio_state.lock().decay;
+        f(&decay)
+    }
+
+    fn with_mut<V, F: FnOnce(&mut f64) -> V>(&self, data: &mut AppState, f: F) -> V {
+        let mut audio_state = data.audio_state.lock();
+        f(&mut audio_state.decay)
+    }
+}
+
+struct AudioVolumeLens;
+
+impl Lens<AppState, f64> for AudioVolumeLens {
+    fn with<V, F: FnOnce(&f64) -> V>(&self, data: &AppState, f: F) -> V {
+        let volume = data.audio_state.lock().volume;
+        f(&volume)
+    }
+
+    fn with_mut<V, F: FnOnce(&mut f64) -> V>(&self, data: &mut AppState, f: F) -> V {
+        let mut audio_state = data.audio_state.lock();
+        f(&mut audio_state.volume)
+    }
+}
+
+struct AudioTransposeLens;
+
+impl Lens<AppState, f64> for AudioTransposeLens {
+    fn with<V, F: FnOnce(&f64) -> V>(&self, data: &AppState, f: F) -> V {
+        let transpose = data.audio_state.lock().transpose;
+        f(&transpose)
+    }
+
+    fn with_mut<V, F: FnOnce(&mut f64) -> V>(&self, data: &mut AppState, f: F) -> V {
+        let mut audio_state = data.audio_state.lock();
+        f(&mut audio_state.transpose)
+    }
 }
 
 #[derive(Clone)]
@@ -112,10 +156,22 @@ impl Widget<ProgressBar> for CustomProgressBar {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
-    println!("{:?}", args);
-    let window = WindowDesc::new(build_ui());
-    let audio = Arc::new(Mutex::new(AudioState::init_audio_state("./audio/static_memories.wav")?));
-    let r_audio = Arc::new(Mutex::new(AudioState::init_audio_state("./audio/Datmosphere.wav")?));
+    let audio_path = if args.len() > 1 {
+        args[1].as_str()
+    } else {
+        "./audio/poem1b.wav"
+    };
+
+    let r_audio_path = if args.len() > 2 {
+        args[2].as_str()
+    } else {
+        "./audio/Datmosphere.wav"
+    };
+
+    let window = WindowDesc::new(build_ui(audio_path.to_string(), r_audio_path.to_string()))
+        .title("Capstone Project Demo");
+    let audio = Arc::new(Mutex::new(AudioState::init_audio_state(audio_path)?));
+    let r_audio = Arc::new(Mutex::new(AudioState::init_audio_state(r_audio_path)?));
     
     let stream = prepare_cpal_stream(Arc::clone(&audio), Arc::clone(&r_audio))?;
     let state = AppState {
@@ -125,15 +181,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         r_playing: false,
         audio_state: audio,
         r_audio_state: r_audio,
-        line_graph: GraphData::new("./audio/Datmosphere.wav")?,
+        line_graph: GraphData::new(r_audio_path)?,
     };
     AppLauncher::with_window(window)
-        .log_to_console()
         .launch(state)?;
     Ok(())
 }
 
-fn build_ui() -> impl druid::Widget<AppState> {
+fn build_ui(audio_text: String, r_audio_text: String) -> impl druid::Widget<AppState> {
     let play_pause_button = Label::new(|data: &AppState, _env: &_| {
         if data.playing {
             "Pause".to_string()
@@ -153,9 +208,7 @@ fn build_ui() -> impl druid::Widget<AppState> {
     });
 
     let progress_bar = SizedBox::new(CustomProgressBar.lens(AppState::progress)).height(24.0);
-    let label = Label::new(|_data: &AppState, _env: &_| {
-        "./audio/static_memories.wav"
-    });
+    let label = Label::new(audio_text);
 
     let r_play_pause_button = Label::new(|data: &AppState, _env: &_| {
         if data.r_playing {
@@ -176,9 +229,7 @@ fn build_ui() -> impl druid::Widget<AppState> {
     });
 
     let r_progress_bar = SizedBox::new(CustomProgressBar.lens(AppState::r_progress)).height(24.0);
-    let r_label = Label::new(|_data: &AppState, _env: &_| {
-        "./audio/Datmosphere.wav"
-    });
+    let r_label = Label::new(r_audio_text);
 
     let graph = SizedBox::new(LineGraph.lens(AppState::line_graph)).height(400.0);
 
@@ -191,12 +242,13 @@ fn build_ui() -> impl druid::Widget<AppState> {
     }))
     .on_click(|_ctx, data: &mut AppState, _env| {
         let plan = data.line_graph.plan.lock();
-        println!("{:?}", plan);
         let mut audio_state = data.audio_state.lock();
         let array = match plan.build_resonator_array(audio_state.sample_rate) {
             Ok(v) => {
                 let v1 = v.clone();
                 let v2 = v;
+                audio_state.decay = 2_f64.log10();
+                audio_state.old_decay = 2_f64.log10();
                 Some((v1, v2))
             },
             Err(e) => {
@@ -205,11 +257,7 @@ fn build_ui() -> impl druid::Widget<AppState> {
             }
         };
         audio_state.filter = array;
-    });
-
-    let progress_bar = SizedBox::new(CustomProgressBar.lens(AppState::progress)).height(24.0);
-    let label = Label::new(|_data: &AppState, _env: &_| {
-        "./audio/static_memories.wav"
+        audio_state.plan = Some(plan.clone());
     });
 
     let max_peaks_label = Label::new("max peaks");
@@ -262,6 +310,36 @@ fn build_ui() -> impl druid::Widget<AppState> {
         .axis(Axis::Vertical)
         .lens(max_freq_lens);
 
+    let decay_label = Label::new("Decay");
+    let decay_slider = Slider::new()
+        .with_range(0.0, 1.0)
+        .with_step(0.0001)
+        .track_color(druid::KeyOrValue::Concrete(Color::rgb8(0x7B, 0x61, 0x9E)))
+        .knob_style(druid::widget::KnobStyle::Circle)
+        .axis(Axis::Vertical)
+        .lens(AudioDecayLens)
+        .fix_height(200.0);
+
+    let volume_label = Label::new("Volume");
+    let volume_slider = Slider::new()
+        .with_range(-40.0, 6.0)
+        .with_step(0.001)
+        .track_color(druid::KeyOrValue::Concrete(Color::rgb8(0x7B, 0x61, 0x9E)))
+        .knob_style(druid::widget::KnobStyle::Circle)
+        .axis(Axis::Vertical)
+        .lens(AudioVolumeLens)
+        .fix_height(200.0);
+
+    let transpose_label = Label::new("Transpose");
+    let transpose_slider = Slider::new()
+        .with_range(-1.0, 1.0)
+        .with_step(0.001)
+        .track_color(druid::KeyOrValue::Concrete(Color::rgb8(0x7B, 0x61, 0x9E)))
+        .knob_style(druid::widget::KnobStyle::Circle)
+        .axis(Axis::Vertical)
+        .lens(AudioTransposeLens)
+        .fix_height(200.0);
+
     Flex::column()
         .with_child(
             Flex::row()
@@ -313,7 +391,27 @@ fn build_ui() -> impl druid::Widget<AppState> {
                 )
                 .with_spacer(8.0)
                 .with_child(build_button)
-            
+        )
+        .with_spacer(8.0)
+        .with_child(
+            Flex::row()
+                .with_child(
+                    Flex::column()
+                        .with_child(decay_label)
+                        .with_child(decay_slider)
+                )     
+                .with_spacer(8.0)   
+                .with_child(
+                    Flex::column()
+                        .with_child(volume_label)
+                        .with_child(volume_slider)
+                )
+                .with_spacer(8.0)   
+                .with_child(
+                    Flex::column()
+                        .with_child(transpose_label)
+                        .with_child(transpose_slider)
+                )
         )
 
 }
