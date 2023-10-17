@@ -165,7 +165,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let r_audio_path = if args.len() > 2 {
         args[2].as_str()
     } else {
-        "./audio/Datmosphere.wav"
+        "./audio/belly_pad.wav"
     };
 
     let window = WindowDesc::new(build_ui(audio_path.to_string(), r_audio_path.to_string()))
@@ -243,6 +243,7 @@ fn build_ui(audio_text: String, r_audio_text: String) -> impl druid::Widget<AppS
     .on_click(|_ctx, data: &mut AppState, _env| {
         let plan = data.line_graph.plan.lock();
         let mut audio_state = data.audio_state.lock();
+        println!("{:#?}", plan);
         let array = match plan.build_resonator_array(audio_state.sample_rate) {
             Ok(v) => {
                 let v1 = v.clone();

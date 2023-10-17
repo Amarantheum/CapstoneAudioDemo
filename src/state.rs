@@ -113,8 +113,8 @@ impl AudioState {
             let new = self.limiter_scale as f32;
 
             for i in 0..buf_size {
-                data[2 * i] += chan1[i] as f32 / 2_f32.powf((new - prev) * (i as f32 / buf_size as f32) + prev + 2.0);
-                data[2 * i + 1] += chan2[i] as f32 / 2_f32.powf((new - prev) * (i as f32 / buf_size as f32) + prev + 2.0);
+                data[2 * i] += chan1[i] as f32; // / 2_f32.powf((new - prev) * (i as f32 / buf_size as f32) + prev + 2.0);
+                data[2 * i + 1] += chan2[i] as f32; // / 2_f32.powf((new - prev) * (i as f32 / buf_size as f32) + prev + 2.0);
             }
         } else {
             for i in 0..buf_size {

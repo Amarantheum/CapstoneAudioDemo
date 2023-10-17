@@ -171,13 +171,15 @@ impl Widget<GraphData> for LineGraph {
         if data.min_range >= data.max_range {
             plan = ScaledResonatorPlan::empty();
         } else {
-            plan = ScaledResonatorPlanner::new()
+            let planner = ScaledResonatorPlanner::new()
                 .with_min_prominence(data.min_prominence * data.spectrum_scale)
                 .with_max_num_peaks((data.max_peaks * MAX_PEAKS as f64) as usize)
                 .with_min_freq(data.min_range)
                 .with_max_freq(data.max_range)
-                .with_min_threshold(data.min_line * data.spectrum_scale + data.spectrum_base)
-                .plan(&data.audio[..]);
+                .with_min_threshold(data.min_line * data.spectrum_scale + data.spectrum_base);
+            println!("{:#?}", planner);
+            plan = planner.plan(&data.audio[..]);
+            println!("{}", plan.resonators.len());
         }
 
         for peak in &plan.resonators {
