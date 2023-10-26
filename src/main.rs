@@ -165,7 +165,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let r_audio_path = if args.len() > 2 {
         args[2].as_str()
     } else {
-        "./audio/belly_pad.wav"
+        "./audio/piano_chord.wav"
     };
 
     let window = WindowDesc::new(build_ui(audio_path.to_string(), r_audio_path.to_string()))
@@ -279,7 +279,8 @@ fn build_ui(audio_text: String, r_audio_text: String) -> impl druid::Widget<AppS
         .track_color(druid::KeyOrValue::Concrete(Color::rgb8(0x7B, 0x61, 0x9E)))
         .knob_style(druid::widget::KnobStyle::Circle)
         .axis(Axis::Vertical)
-        .lens(min_prom_lens);
+        .lens(min_prom_lens)
+        .fix_height(200.0);
 
     let min_thresh_label = Label::new("min threshold");
     let min_line_lens = AppState::line_graph.then(GraphData::min_line);
